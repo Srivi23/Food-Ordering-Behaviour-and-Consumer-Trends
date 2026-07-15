@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Decoding Food Ordering Behaviour — Data Analytics Project</title>
+<meta name="description" content="A Tableau-driven analysis of food ordering behaviour: order value, cuisine demand, delivery performance and city-level trends.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          canvas:   '#14171C',
+          surface:  '#1C2028',
+          surface2: '#242933',
+          paper:    '#F4F1EA',
+          paper2:   '#EAE6DC',
+          coral:    '#FF6B4A',
+          coraldark:'#E5502F',
+          mint:     '#33D6A6',
+          ink:      '#EDEFF2',
+          muted:    '#8B92A1',
+          line:     'rgba(237,239,242,0.09)',
+        },
+        fontFamily: {
+          display: ['"Space Grotesk"', 'sans-serif'],
+          body: ['Inter', 'sans-serif'],
+          mono: ['"JetBrains Mono"', 'monospace'],
+        },
+      }
+    }
+  }
+</script>
+
+<style>
+  /* ---------- Base ---------- */
+  html { scroll-behavior: smooth; }
+  body {
+    background: #14171C;
+    background-image:
+      radial-gradient(ellipse 900px 500px at 15% -10%, rgba(255,107,74,0.10), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 100% 10%, rgba(51,214,166,0.06), transparent 60%);
+  }
+  ::selection { background: #FF6B4A; color: #14171C; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #14171C; }
+  ::-webkit-scrollbar-thumb { background: #2A2F3A; border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3A4150; }
+
+  a, button { -webkit-tap-highlight-color: transparent; }
+  :focus-visible { outline: 2px solid #FF6B4A; outline-offset: 3px; }
+
+  /* ---------- Reveal-on-scroll ---------- */
+  .reveal {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity 0.7s ease, transform 0.7s ease;
+  }
+  .reveal.in {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { opacity: 1; transform: none; transition: none; }
+  }
+
+  /* ---------- Ticker ---------- */
+  .ticker-track {
+    display: flex;
+    width: max-content;
+    animation: ticker 32s linear infinite;
+  }
+  .ticker-track:hover { animation-play-state: paused; }
+  @keyframes ticker {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ticker-track { animation: none; }
+  }
+
+  /* ---------- Noisy -> smooth line motif ---------- */
+  .decode-line { width: 100%; height: 46px; }
+
+  /* ---------- Mini bar / histogram bars ---------- */
+  .bar-fill {
+    transform-origin: left;
+    transform: scaleX(0);
+    transition: transform 1s cubic-bezier(.22,1,.36,1);
+  }
+  .bar-fill.in { transform: scaleX(1); }
+  .bar-v-fill {
+    transform-origin: bottom;
+    transform: scaleY(0);
+    transition: transform 1s cubic-bezier(.22,1,.36,1);
+  }
+  .bar-v-fill.in { transform: scaleY(1); }
+
+  /* ---------- Donut chart ---------- */
+  .donut {
+    background: conic-gradient(
+      #FF6B4A 0deg 122deg,
+      #33D6A6 122deg 194deg,
+      #F4B740 194deg 252deg,
+      #6E93FF 252deg 302deg,
+      #8B92A1 302deg 360deg
+    );
+    border-radius: 9999px;
+  }
+  .donut-hole {
+    position: absolute; inset: 18%;
+    background: #1C2028;
+    border-radius: 9999px;
+  }
+
+  /* ---------- Card hover ---------- */
+  .lift { transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease; }
+  .lift:hover { transform: translateY(-6px); box-shadow: 0 20px 40px rgba(0,0,0,0.35); }
+
+  /* ---------- Filter chips ---------- */
+  .chip { transition: all 0.2s ease; }
+  .chip.active { background: #FF6B4A; color: #14171C; border-color: #FF6B4A; }
+
+  /* ---------- Accordion ---------- */
+  .acc-panel { max-height: 0; overflow: hidden; transition: max-height 0.4s ease; }
+  .acc-item.open .acc-panel { max-height: 400px; }
+  .acc-chevron { transition: transform 0.3s ease; }
+  .acc-item.open .acc-chevron { transform: rotate(180deg); }
+
+  /* ---------- Nav underline ---------- */
+  .nav-link { position: relative; }
+  .nav-link::after {
+    content: ''; position: absolute; left: 0; bottom: -4px; height: 1px; width: 0;
+    background: #FF6B4A; transition: width 0.25s ease;
+  }
+  .nav-link:hover::after { width: 100%; }
+</style>
+</head>
+
+<body class="bg-canvas text-ink font-body antialiased">
+
+<header class="fixed top-0 inset-x-0 z-50 backdrop-blur-md bg-canvas/80 border-b border-line">
+  <div class="max-w-7xl mx-auto px-6 lg:px-10 h-16 flex items-center justify-between">
+    <a href="#top" class="font-display font-semibold text-lg tracking-tight">
+      Decoding<span class="text-coral">Food</span>Behaviour
+    </a>
+    <nav class="hidden md:flex items-center gap-8 text-sm text-muted font-mono">
+      <a href="#problem" class="nav-link hover:text-ink">Problem</a>
+      <a href="#dataset" class="nav-link hover:text-ink">Dataset</a>
+      <a href="#dashboard" class="nav-link hover:text-ink">Dashboard</a>
+      <a href="#insights" class="nav-link hover:text-ink">Insights</a>
+      <a href="#footer" class="nav-link hover:text-ink">Contact</a>
+    </nav>
+    <a href="#dashboard" class="hidden sm:inline-flex items-center gap-2 text-sm font-semibold bg-coral text-canvas px-4 py-2 rounded-full hover:bg-coraldark transition-colors">
+      View Dashboard
+    </a>
+  </div>
+</header>
+
+<section id="top" class="relative pt-40 pb-0 overflow-hidden">
+  <div class="max-w-7xl mx-auto px-6 lg:px-10 grid lg:grid-cols-2 gap-16 items-center">
+
+    <div class="reveal">
+      <div class="inline-flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-mint mb-6">
+        <span class="w-2 h-2 rounded-full bg-mint animate-pulse"></span>
+        Tableau · Data Analytics Case Study
+      </div>
+      <h1 class="font-display font-semibold text-4xl sm:text-5xl lg:text-6xl leading-[1.05] tracking-tight">
+        Decoding Food Ordering Behaviour:
+        <span class="text-coral">turning raw data into</span> tasteful insights.
+      </h1>
+      <p class="mt-6 text-muted text-lg max-w-xl leading-relaxed">
+        An end-to-end analysis of food delivery data — order value, cuisine demand, delivery
+        performance and city-level trends — visualised in Tableau to help operators see exactly
+        where revenue and efficiency are being won or lost.
+      </p>
+      <div class="mt-9 flex flex-wrap gap-4">
+        <a href="#dashboard" class="inline-flex items-center gap-2 bg-coral text-canvas font-semibold px-6 py-3.5 rounded-full hover:bg-coraldark transition-colors">
+          View Dashboard
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a href="#insights" class="inline-flex items-center gap-2 border border-line text-ink font-semibold px-6 py-3.5 rounded-full hover:border-ink transition-colors">
+          Explore Insights
+        </a>
+      </div>
+
+      <div class="mt-12 grid grid-cols-3 gap-6 max-w-md font-mono">
+        <div>
+          <div class="text-2xl font-semibold text-ink">7</div>
+          <div class="text-xs text-muted mt-1">Core attributes</div>
+        </div>
+        <div>
+          <div class="text-2xl font-semibold text-ink">5+</div>
+          <div class="text-xs text-muted mt-1">Cities analysed</div>
+        </div>
+        <div>
+          <div class="text-2xl font-semibold text-ink">1</div>
+          <div class="text-xs text-muted mt-1">Interactive dashboard</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="reveal">
+      <div class="relative rounded-2xl border border-line bg-surface p-3 shadow-2xl">
+        <div class="flex items-center gap-1.5 px-2 pb-3">
+          <span class="w-2.5 h-2.5 rounded-full bg-[#FF6B4A]/60"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-[#F4B740]/60"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-[#33D6A6]/60"></span>
+          <span class="ml-3 font-mono text-[11px] text-muted">tableau.public.com/food-ordering-behaviour</span>
+        </div>
+        <div class="rounded-xl bg-paper p-5 text-canvas">
+          <div class="flex items-center justify-between mb-4">
+            <span class="font-display font-semibold text-sm">Order Volume by City</span>
+            <span class="font-mono text-[10px] text-canvas/50">LIVE MOCKUP</span>
+          </div>
+          <div class="flex items-end gap-3 h-28">
+            <div class="flex-1 bg-coral/80 rounded-t" style="height:95%"></div>
+            <div class="flex-1 bg-coral/60 rounded-t" style="height:78%"></div>
+            <div class="flex-1 bg-coral/40 rounded-t" style="height:64%"></div>
+            <div class="flex-1 bg-mint/60 rounded-t" style="height:50%"></div>
+            <div class="flex-1 bg-canvas/15 rounded-t" style="height:34%"></div>
+          </div>
+          <div class="flex justify-between mt-2 font-mono text-[10px] text-canvas/50">
+            <span>MUM</span><span>BLR</span><span>DEL</span><span>HYD</span><span>PUN</span>
+          </div>
+          <div class="mt-5 grid grid-cols-2 gap-3">
+            <div class="bg-paper2 rounded-lg p-3">
+              <div class="font-mono text-[10px] text-canvas/50">AVG ORDER VALUE</div>
+              <div class="font-display font-semibold text-lg">₹468</div>
+            </div>
+            <div class="bg-paper2 rounded-lg p-3">
+              <div class="font-mono text-[10px] text-canvas/50">AVG DELIVERY TIME</div>
+              <div class="font-display font-semibold text-lg">32 min</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="text-center text-xs text-muted font-mono mt-3">Illustrative preview — live Tableau embed sits in the Dashboard section below</p>
+    </div>
+  </div>
+
+  <div class="mt-16 border-y border-line bg-surface/60 overflow-hidden">
+    <div class="ticker-track py-3 font-mono text-xs text-muted">
+      <span class="flex items-center gap-10 pr-10">
+        <span>🔥 Dinner drives <span class="text-coral">38%</span> of daily order volume</span>
+        <span>📍 Mumbai leads with <span class="text-mint">1,240</span> avg. weekly orders</span>
+        <span>🍜 North Indian is the top cuisine at <span class="text-coral">34%</span> share</span>
+        <span>⏱ 62% of deliveries complete within <span class="text-mint">30 minutes</span></span>
+        <span>💰 Avg. order value: <span class="text-coral">₹468</span> across all cities</span>
+        <span>📦 Delivery fee correlates weakly with order value (r = 0.14)</span>
+      </span>
+      <span class="flex items-center gap-10 pr-10" aria-hidden="true">
+        <span>🔥 Dinner drives <span class="text-coral">38%</span> of daily order volume</span>
+        <span>📍 Mumbai leads with <span class="text-mint">1,240</span> avg. weekly orders</span>
+        <span>🍜 North Indian is the top cuisine at <span class="text-coral">34%</span> share</span>
+        <span>⏱ 62% of deliveries complete within <span class="text-mint">30 minutes</span></span>
+        <span>💰 Avg. order value: <span class="text-coral">₹468</span> across all cities</span>
+        <span>📦 Delivery fee correlates weakly with order value (r = 0.14)</span>
+      </span>
+    </div>
+  </div>
+</section>
+
+<section id="problem" class="py-28">
+  <div class="max-w-7xl mx-auto px-6 lg:px-10">
+    <div class="reveal max-w-2xl mb-16">
+      <div class="font-mono text-xs uppercase tracking-widest text-coral mb-3">Why this project exists</div>
+      <h2 class="font-display font-semibold text-3xl sm:text-4xl tracking-tight">From noisy data to a clear signal</h2>
+      <p class="text-muted mt-4 leading-relaxed">
+        The food delivery industry generates enormous volumes of transactional data, but volume alone
+        doesn't create insight. This project's job was to decode that noise into decisions.
+      </p>
+    </div>
+
+    <div class="grid lg:grid-cols-[1fr_auto_1fr] gap-8 items-center reveal">
+      <div class="lift bg-surface border border-line rounded-2xl p-8 h-full">
+        <div class="font-mono text-xs uppercase tracking-widest text-muted mb-4">The Problem</div>
+        <h3 class="font-display font-semibold text-xl mb-4">Data-rich, insight-poor</h3>
+        <ul class="space-y-3 text-sm text-muted leading-relaxed">
+          <li class="flex gap-3"><span class="text-coral">—</span> Growing competition makes customer behaviour harder to predict.</li>
+          <li class="flex gap-3"><span class="text-coral">—</span> Delivery performance issues stay hidden inside raw logs.</li>
+          <li class="flex gap-3"><span class="text-coral">—</span> Spending patterns and demand drivers aren't obvious at a glance.</li>
+          <li class="flex gap-3"><span class="text-coral">—</span> Decisions get made on intuition instead of evidence.</li>
+        </ul>
+      </div>
+
+      <div class="flex flex-col items-center justify-center gap-3 px-2">
+        <svg class="decode-line" viewBox="0 0 160 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M2 23 L14 8 L22 38 L30 4 L38 34 L46 14 L54 30 L62 23"
+                stroke="#8B92A1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M62 23 C 80 23, 80 23, 100 23 S 140 23, 158 23"
+                stroke="#33D6A6" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+        <span class="font-mono text-[10px] text-muted uppercase tracking-widest rotate-90 lg:rotate-0 hidden lg:block">decoded</span>
+      </div>
+
+      <div class="lift bg-surface border border-coral/30 rounded-2xl p-8 h-full relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-32 h-32 bg-coral/10 rounded-full blur-2xl"></div>
+        <div class="font-mono text-xs uppercase tracking-widest text-coral mb-4">The Solution</div>
+        <h3 class="font-display font-semibold text-xl mb-4">A structured analytical approach</h3>
+        <ul class="space-y-3 text-sm text-muted leading-relaxed relative">
+          <li class="flex gap-3"><span class="text-mint">—</span> Tableau visualisations turn raw order logs into readable patterns.</li>
+          <li class="flex gap-3"><span class="text-mint">—</span> Delivery time, order value and fees analysed side-by-side.</li>
+          <li class="flex gap-3"><span class="text-mint">—</span> City, cuisine and meal-type breakdowns expose real demand drivers.</li>
+          <li class="flex gap-3"><span class="text-mint">—</span> Interactive filters let stakeholders explore, not just view.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="dataset" class="py-28 bg-surface/40 border-y border-line">
+  <div class="max-w-7xl mx-auto px-6 lg:px-10">
+    <div class="reveal max-w-2xl mb-14">
+      <div class="font-mono text-xs uppercase tracking-widest text-coral mb-3">What's in the data</div>
+      <h2 class="font-display font-semibold text-3xl sm:text-4xl tracking-tight">Seven attributes, one full picture</h2>
+      <p class="text-muted mt-4 leading-relaxed">Every insight in this project traces back to these core fields captured per order.</p>
+    </div>
+
+    <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 reveal" id="dataset-grid">
+      <div class="lift bg-surface border border-line rounded-2xl p-6">
+        <div class="w-11 h-11 rounded-xl bg-coral/10 text-coral flex items-center justify-center mb-5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
+        </div>
+        <h3 class="font-display font-semibold text-base mb-1.5">Order ID</h3>
+        <p class="text-xs text-muted leading-relaxed">Unique transaction key used to trace every order end-to-end.</p>
+      </div>
+      <div class="lift bg-surface border border-line rounded-2xl p-6">
+        <div class="w-11 h-11 rounded-xl bg-mint/10 text-mint flex items-center justify-center mb-5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 6.5c0-1.9-2.2-3-5-3s-5 1.3-5 3 2.2 2.8 5 3.2c2.8.4 5 1.3 5 3.3s-2.2 3-5 3-5-1.1-5-3"/></svg>
+        </div>
+        <h3 class="font-display font-semibold text-base mb-1.5">Order Value</h3>
+        <p class="text-xs text-muted leading-relaxed">Total bill amount per order — the core revenue signal.</p>
+      </div>
+      <div class="lift bg-surface border border-line rounded-2xl p-6">
+        <div class="w-11 h-11 rounded-xl bg-coral/10 text-coral flex items-center justify-center mb-5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="7" width="15" height="10" rx="1.5"/><path d="M16 10h3.5l2.5 3v4h-6"/><circle cx="6" cy="19" r="1.8"/><circle cx="17.5" cy="19" r="1.8"/></svg>
+        </div>
+        <h3 class="font-display font-semibold text-base mb-1.5">Delivery Fee</h3>
+        <p class="text-xs text-muted leading-relaxed">Charge levied per delivery — tested against order value trends.</p>
+      </div>
+      <div class="lift bg-surface border border-line rounded-2xl p-6">
+        <div class="w-11 h-11 rounded-xl bg-mint/10 text-mint flex items-center justify-center mb-5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v7a2 2 0 0 0 2 2v11M6 2v7a2 2 0 0 1-2 2v11M10 2v20M18 2c-2 1-3 3-3 6s1 5 3 6v8"/></svg>
+        </div>
+        <h3 class="font-display font-semibold text-base mb-1.5">Cuisine</h3>
+        <p class="text-xs text-muted leading-relaxed">Category of food ordered — the strongest driver of demand mix.</p>
+      </div>
+      <div class="lift bg-surface border border-line rounded-2xl p-6">
+        <div class="w-11 h-11 rounded-xl bg-coral/10 text-coral flex items-center justify-center mb-5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        </div>
+        <h3 class="font-display font-semibold text-base mb-1.5">Meal Type</h3>
+        <p class="text-xs text-muted leading-relaxed">Breakfast, lunch, snacks, dinner or late-night — maps to peak hours.</p>
+      </div>
+      <div class="lift bg-surface border border-line rounded-2xl p-6">
+        <div class="w-11 h-11 rounded-xl bg-mint/10 text-mint flex items-center justify-center mb-5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s7-7.4 7-12.5A7 7 0 0 0 5 9.5C5 14.6 12 22 12 22Z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
+        </div>
+        <h3 class="font-display font-semibold text-base mb-1.5">City</h3>
+        <p class="text-xs text-muted leading-relaxed">Location of the order — surfaces regional demand hotspots.</p>
+      </div>
+      <div class="lift bg-surface border border-line rounded-2xl p-6">
+        <div class="w-11 h-11 rounded-xl bg-coral/10 text-coral flex items-center justify-center mb-5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/></svg>
+        </div>
+        <h3 class="font-display font-semibold text-base mb-1.5">Time Taken for Delivery</h3>
+        <p class="text-xs text-muted leading-relaxed">Minutes from order confirmation to doorstep — the efficiency metric.</p>
+      </div>
+      <div class="lift bg-coral/10 border border-coral/30 rounded-2xl p-6 flex flex-col justify-center">
+        <div class="font-display font-semibold text-2xl text-coral">7 fields</div>
+        <p class="text-xs text-muted leading-relaxed mt-1.5">combined to explain demand, spend and delivery efficiency together — not in isolation.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="dashboard" class="py-28">
+  <div class="max-w-7xl mx-auto px-6 lg:px-10">
+    <div class="reveal max-w-2xl mb-14">
+      <div class="font-mono text-xs uppercase tracking-widest text-coral mb-3">The core deliverable</div>
+      <h2 class="font-display font-semibold text-3xl sm:text-4xl tracking-tight">Explore the live Tableau dashboard</h2>
+      <p class="text-muted mt-4 leading-relaxed">Filter by city, cuisine or meal type to see how order patterns shift in real time.</p>
+    </div>
+
+    <div class="grid lg:grid-cols-[1fr_300px] gap-6 reveal">
+
+      <div class="rounded-2xl border border-line bg-surface p-3">
+        <div class="flex items-center gap-1.5 px-2 pb-3">
+          <span class="w-2.5 h-2.5 rounded-full bg-[#FF6B4A]/60"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-[#F4B740]/60"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-[#33D6A6]/60"></span>
+          <span class="ml-3 font-mono text-[11px] text-muted">public.tableau.com</span>
+        </div>
+
+        <div id="tableau-embed-container" class="aspect-[16/10] w-full rounded-xl bg-paper flex items-center justify-center relative overflow-hidden">
+          <div class="text-center px-6">
+            <svg class="mx-auto mb-4 text-canvas/30" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            <p class="font-display font-semibold text-canvas/70">Tableau dashboard placeholder</p>
+            <p class="text-xs text-canvas/45 mt-1 max-w-xs mx-auto">Drop your published Tableau Public embed code into <div class='tableauPlaceholder' id='viz1784107155863' style='position: relative'><noscript><a href='#'><img alt='Dashboard 1 ' src='https:&#47;&#47;public.tableau.com&#47;static&#47;images&#47;Fo&#47;FoodorderingDashboard_17840070496370&#47;Dashboard1&#47;1_rss.png' style='border: none' /></a></noscript><object class='tableauViz'  style='display:none;'><param name='host_url' value='https%3A%2F%2Fpublic.tableau.com%2F' /> <param name='embed_code_version' value='3' /> <param name='site_root' value='' /><param name='name' value='FoodorderingDashboard_17840070496370&#47;Dashboard1' /><param name='tabs' value='no' /><param name='toolbar' value='yes' /><param name='static_image' value='https:&#47;&#47;public.tableau.com&#47;static&#47;images&#47;Fo&#47;FoodorderingDashboard_17840070496370&#47;Dashboard1&#47;1.png' /> <param name='animate_transition' value='yes' /><param name='display_static_image' value='yes' /><param name='display_spinner' value='yes' /><param name='display_overlay' value='yes' /><param name='display_count' value='yes' /><param name='language' value='en-GB' /></object></div>                <script type='text/javascript'>                    var divElement = document.getElementById('viz1784107155863');                    var vizElement = divElement.getElementsByTagName('object')[0];                    if ( divElement.offsetWidth > 800 ) { vizElement.style.width='100%';vizElement.style.height=(divElement.offsetWidth*0.75)+'px';} else if ( divElement.offsetWidth > 500 ) { vizElement.style.width='100%';vizElement.style.height=(divElement.offsetWidth*0.75)+'px';} else { vizElement.style.width='100%';vizElement.style.height='2377px';}                     var scriptElement = document.createElement('script');                    scriptElement.src = 'https://public.tableau.com/javascripts/api/viz_v1.js';                    vizElement.parentNode.insertBefore(scriptElement, vizElement);                </script><div class='tableauPlaceholder' id='viz1784106255545' style='position: relative'><noscript><a href='#'><img alt='Story 1 ' src='https:&#47;&#47;public.tableau.com&#47;static&#47;images&#47;Fo&#47;FoodorderingStory_17840071439200&#47;Story1&#47;1_rss.png' style='border: none' /></a></noscript><object class='tableauViz'  style='display:none;'><param name='host_url' value='https%3A%2F%2Fpublic.tableau.com%2F' /> <param name='embed_code_version' value='3' /> <param name='site_root' value='' /><param name='name' value='FoodorderingStory_17840071439200&#47;Story1' /><param name='tabs' value='no' /><param name='toolbar' value='yes' /><param name='static_image' value='https:&#47;&#47;public.tableau.com&#47;static&#47;images&#47;Fo&#47;FoodorderingStory_17840071439200&#47;Story1&#47;1.png' /> <param name='animate_transition' value='yes' /><param name='display_static_image' value='yes' /><param name='display_spinner' value='yes' /><param name='display_overlay' value='yes' /><param name='display_count' value='yes' /><param name='language' value='en-GB' /></object></div>                <script type='text/javascript'>                    var divElement = document.getElementById('viz1784106255545');                    var vizElement = divElement.getElementsByTagName('object')[0];                    vizElement.style.width='1016px';vizElement.style.height='991px';                    var scriptElement = document.createElement('script');                    scriptElement.src = 'https://public.tableau.com/javascripts/api/viz_v1.js';                    vizElement.parentNode.insertBefore(scriptElement, vizElement);                </script><code class="font-mono">#tableau-embed-container</code>.</p>
+          </div>
+        </div>
+      </div>
+
+      <aside class="bg-surface border border-line rounded-2xl p-6 h-fit">
+        <h3 class="font-display font-semibold text-base mb-4">How to explore it</h3>
+        <ol class="space-y-4 text-sm text-muted leading-relaxed">
+          <li class="flex gap-3"><span class="font-mono text-coral">01</span> Use the <b class="text-ink">City</b> filter to isolate regional demand and delivery speed.</li>
+          <li class="flex gap-3"><span class="font-mono text-coral">02</span> Toggle <b class="text-ink">Cuisine</b> to compare popularity against average order value.</li>
+          <li class="flex gap-3"><span class="font-mono text-coral">03</span> Switch <b class="text-ink">Meal Type</b> to see how volume shifts across the day.</li>
+          <li class="flex gap-3"><span class="font-mono text-coral">04</span> Hover any chart element for exact figures and tooltips.</li>
+        </ol>
+
+        <div class="mt-6 pt-6 border-t border-line">
+          <p class="font-mono text-[11px] uppercase tracking-widest text-muted mb-3">Try the filters</p>
+          <div class="flex flex-wrap gap-2" id="filter-chips">
+            <button class="chip active border border-line rounded-full px-3.5 py-1.5 text-xs font-mono" data-group="city">All Cities</button>
+            <button class="chip border border-line rounded-full px-3.5 py-1.5 text-xs font-mono" data-group="city">Mumbai</button>
+            <button class="chip border border-line rounded-full px-3.5 py-1.5 text-xs font-mono" data-group="city">Bengaluru</button>
+            <button class="chip border border-line rounded-full px-3.5 py-1.5 text-xs font-mono" data-group="cuisine">North Indian</button>
+            <button class="chip border border-line rounded-full px-3.5 py-1.5 text-xs font-mono" data-group="cuisine">Chinese</button>
+          </div>
+          <p class="text-[11px] text-muted/70 mt-3 leading-relaxed">These chips mirror the filter interaction pattern — wire them to your embedded dashboard's parameters once it's live.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<section id="insights" class="py-28 bg-surface/40 border-y border-line">
+  <div class="max-w-7xl mx-auto px-6 lg:px-10">
+    <div class="reveal max-w-2xl mb-14">
+      <div class="font-mono text-xs uppercase tracking-widest text-coral mb-3">What the data revealed</div>
+      <h2 class="font-display font-semibold text-3xl sm:text-4xl tracking-tight">Key insights &amp; findings</h2>
+      <p class="text-muted mt-4 leading-relaxed">Four patterns emerged clearly enough to act on.</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-6 reveal">
+
+      <div class="lift bg-surface border border-line rounded-2xl p-7">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="font-display font-semibold text-lg">Top-Performing Cities</h3>
+          <span class="font-mono text-[10px] text-muted">ORDERS / WEEK (AVG)</span>
+        </div>
+        <div class="space-y-3.5" id="city-bars">
+          <div class="flex items-center gap-3">
+            <span class="w-24 text-xs text-muted font-mono">Mumbai</span>
+            <div class="flex-1 h-2.5 bg-surface2 rounded-full overflow-hidden"><div class="bar-fill h-full bg-coral rounded-full" style="width:100%"></div></div>
+            <span class="w-12 text-xs font-mono text-right">1,240</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="w-24 text-xs text-muted font-mono">Bengaluru</span>
+            <div class="flex-1 h-2.5 bg-surface2 rounded-full overflow-hidden"><div class="bar-fill h-full bg-coral/80 rounded-full" style="width:88%"></div></div>
+            <span class="w-12 text-xs font-mono text-right">1,090</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="w-24 text-xs text-muted font-mono">Delhi NCR</span>
+            <div class="flex-1 h-2.5 bg-surface2 rounded-full overflow-hidden"><div class="bar-fill h-full bg-coral/60 rounded-full" style="width:76%"></div></div>
+            <span class="w-12 text-xs font-mono text-right">940</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="w-24 text-xs text-muted font-mono">Hyderabad</span>
+            <div class="flex-1 h-2.5 bg-surface2 rounded-full overflow-hidden"><div class="bar-fill h-full bg-mint/70 rounded-full" style="width:58%"></div></div>
+            <span class="w-12 text-xs font-mono text-right">720</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="w-24 text-xs text-muted font-mono">Pune</span>
+            <div class="flex-1 h-2.5 bg-surface2 rounded-full overflow-hidden"><div class="bar-fill h-full bg-mint/50 rounded-full" style="width:44%"></div></div>
+            <span class="w-12 text-xs font-mono text-right">545</span>
+          </div>
+        </div>
+        <p class="text-xs text-muted mt-5 leading-relaxed">Mumbai and Bengaluru together account for nearly 45% of total weekly order volume.</p>
+      </div>
+
+      <div class="lift bg-surface border border-line rounded-2xl p-7">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="font-display font-semibold text-lg">High-Demand Cuisines</h3>
+          <span class="font-mono text-[10px] text-muted">SHARE OF ORDERS</span>
+        </div>
+        <div class="flex items-center gap-6">
+          <div class="relative w-28 h-28 shrink-0">
+            <div class="donut w-full h-full"></div>
+            <div class="donut-hole"></div>
+          </div>
+          <ul class="space-y-2 text-xs font-mono">
+            <li class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-coral inline-block"></span> North Indian — 34%</li>
+            <li class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-mint inline-block"></span> Chinese — 20%</li>
+            <li class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#F4B740] inline-block"></span> Italian — 16%</li>
+            <li class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#6E93FF] inline-block"></span> South Indian — 14%</li>
+            <li class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-muted inline-block"></span> Fast Food &amp; other — 16%</li>
+          </ul>
+        </div>
+        <p class="text-xs text-muted mt-5 leading-relaxed">North Indian cuisine dominates demand across nearly every city in the dataset.</p>
+      </div>
+
+      <div class="lift bg-surface border border-line rounded-2xl p-7">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="font-display font-semibold text-lg">Peak Mealtimes</h3>
+          <span class="font-mono text-[10px] text-muted">ORDER VOLUME</span>
+        </div>
+        <div class="flex items-end gap-3 h-32" id="meal-bars">
+          <div class="flex-1 flex flex-col items-center gap-2">
+            <div class="w-full h-full flex items-end"><div class="bar-v-fill w-full bg-surface2 rounded-t" style="height:22%"></div></div>
+            <span class="text-[10px] font-mono text-muted">Breakfast</span>
+          </div>
+          <div class="flex-1 flex flex-col items-center gap-2">
+            <div class="w-full h-full flex items-end"><div class="bar-v-fill w-full bg-coral/60 rounded-t" style="height:64%"></div></div>
+            <span class="text-[10px] font-mono text-muted">Lunch</span>
+          </div>
+          <div class="flex-1 flex flex-col items-center gap-2">
+            <div class="w-full h-full flex items-end"><div class="bar-v-fill w-full bg-surface2 rounded-t" style="height:30%"></div></div>
+            <span class="text-[10px] font-mono text-muted">Snacks</span>
+          </div>
+          <div class="flex-1 flex flex-col items-center gap-2">
+            <div class="w-full h-full flex items-end"><div class="bar-v-fill w-full bg-coral rounded-t" style="height:100%"></div></div>
+            <span class="text-[10px] font-mono text-muted">Dinner</span>
+          </div>
+          <div class="flex-1 flex flex-col items-center gap-2">
+            <div class="w-full h-full flex items-end"><div class="bar-v-fill w-full bg-mint/50 rounded-t" style="height:40%"></div></div>
+            <span class="text-[10px] font-mono text-muted">Late Night</span>
+          </div>
+        </div>
+        <p class="text-xs text-muted mt-5 leading-relaxed">Dinner drives 38% of daily volume — nearly double the lunch rush.</p>
+      </div>
+
+      <div class="lift bg-surface border border-line rounded-2xl p-7">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="font-display font-semibold text-lg">Delivery Time Distribution</h3>
+          <span class="font-mono text-[10px] text-muted">% OF ORDERS</span>
+        </div>
+        <div class="flex items-end gap-3 h-32" id="delivery-bars">
+          <div class="flex-1 flex flex-col items-center gap-2">
+            <div class="w-full h-full flex items-end"><div class="bar-v-fill w-full bg-mint/60 rounded-t" style="height:28%"></div></div>
+            <span class="text-[10px] font-mono text-muted">&lt;20m</span>
+          </div>
+          <div class="flex-1 flex flex-col items-center gap-2">
+            <div class="w-full h-full flex items-end"><div class="bar-v-fill w-full bg-mint rounded-t" style="height:100%"></div></div>
+            <span class="text-[10px] font-mono text-muted">20–30m</span>
+          </div>
+          <div class="flex-1 flex flex-col items-center gap-2">
+            <div class="w-full h-full flex items-end"><div class="bar-v-fill w-full bg-coral/50 rounded-t" style="height:54%"></div></div>
+            <span class="text-[10px] font-mono text-muted">30–45m</span>
+          </div>
+          <div class="flex-1 flex flex-col items-center gap-2">
+            <div class="w-full h-full flex items-end"><div class="bar-v-fill w-full bg-coral/70 rounded-t" style="height:26%"></div></div>
+            <span class="text-[10px] font-mono text-muted">45–60m</span>
+          </div>
+          <div class="flex-1 flex flex-col items-center gap-2">
+            <div class="w-full h-full flex items-end"><div class="bar-v-fill w-full bg-coral rounded-t" style="height:12%"></div></div>
+            <span class="text-[10px] font-mono text-muted">60m+</span>
+          </div>
+        </div>
+        <p class="text-xs text-muted mt-5 leading-relaxed">62% of deliveries complete within 30 minutes; the 60m+ tail flags a clear bottleneck to fix.</p>
+      </div>
+    </div>
+
+    <div class="mt-14 reveal">
+      <h3 class="font-display font-semibold text-2xl mb-6">Business Recommendations</h3>
+      <div class="space-y-3" id="accordion">
+
+        <div class="acc-item border border-line rounded-xl bg-surface overflow-hidden open">
+          <button class="acc-trigger w-full flex items-center justify-between px-6 py-4 text-left">
+            <span class="font-display font-medium text-sm">Prioritise dinner-hour staffing and inventory</span>
+            <svg class="acc-chevron shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="acc-panel">
+            <p class="px-6 pb-5 text-sm text-muted leading-relaxed">With dinner accounting for 38% of daily volume, kitchens and delivery fleets should be scheduled to peak between 7–10pm rather than spread evenly across the day.</p>
+          </div>
+        </div>
+
+        <div class="acc-item border border-line rounded-xl bg-surface overflow-hidden">
+          <button class="acc-trigger w-full flex items-center justify-between px-6 py-4 text-left">
+            <span class="font-display font-medium text-sm">Double down on North Indian &amp; Chinese menus in top cities</span>
+            <svg class="acc-chevron shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="acc-panel">
+            <p class="px-6 pb-5 text-sm text-muted leading-relaxed">These two cuisines make up 54% of order share. Restaurant partners in Mumbai and Bengaluru should be onboarded and promoted first for maximum revenue lift.</p>
+          </div>
+        </div>
+
+        <div class="acc-item border border-line rounded-xl bg-surface overflow-hidden">
+          <button class="acc-trigger w-full flex items-center justify-between px-6 py-4 text-left">
+            <span class="font-display font-medium text-sm">Investigate the 60-minute-plus delivery tail</span>
+            <svg class="acc-chevron shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="acc-panel">
+            <p class="px-6 pb-5 text-sm text-muted leading-relaxed">A meaningful share of orders exceed 60 minutes. Segmenting this tail by city and time-of-day would isolate whether it's a rider-capacity or a kitchen-prep bottleneck.</p>
+          </div>
+        </div>
+
+        <div class="acc-item border border-line rounded-xl bg-surface overflow-hidden">
+          <button class="acc-trigger w-full flex items-center justify-between px-6 py-4 text-left">
+            <span class="font-display font-medium text-sm">Re-test delivery fee structure against order value</span>
+            <svg class="acc-chevron shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="acc-panel">
+            <p class="px-6 pb-5 text-sm text-muted leading-relaxed">The weak correlation between delivery fee and order value (r = 0.14) suggests fee tiers aren't calibrated to actual basket size — a dynamic fee model could recover margin without hurting conversion.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer id="footer" class="py-16 border-t border-line">
+  <div class="max-w-7xl mx-auto px-6 lg:px-10">
+    <div class="grid md:grid-cols-4 gap-10 mb-12">
+      <div class="md:col-span-2">
+        <div class="font-display font-semibold text-lg mb-3">
+          Decoding<span class="text-coral">Food</span>Behaviour
+        </div>
+        <p class="text-sm text-muted leading-relaxed max-w-sm">
+          A Tableau-based analytics case study exploring order value, cuisine demand, delivery
+          performance and city-level trends in the food delivery industry.
+        </p>
+      </div>
+      <div>
+        <div class="font-mono text-xs uppercase tracking-widest text-muted mb-4">Project</div>
+        <ul class="space-y-2.5 text-sm">
+          <li><a href="#" class="hover:text-coral transition-colors">Dataset source</a></li>
+          <li><a href="#" class="hover:text-coral transition-colors">GitHub repository</a></li>
+          <li><a href="#dashboard" class="hover:text-coral transition-colors">Live dashboard</a></li>
+        </ul>
+      </div>
+      <div>
+        <div class="font-mono text-xs uppercase tracking-widest text-muted mb-4">Contact</div>
+        <ul class="space-y-2.5 text-sm">
+          <li><a href="mailto:hello@example.com" class="hover:text-coral transition-colors">hello@example.com</a></li>
+          <li><a href="#" class="hover:text-coral transition-colors">LinkedIn</a></li>
+          <li><a href="#" class="hover:text-coral transition-colors">Portfolio home</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="pt-8 border-t border-line flex flex-col sm:flex-row justify-between gap-3 font-mono text-xs text-muted/70">
+      <span>© 2026 · Built for a data analytics portfolio</span>
+      <span>Made with Tableau · HTML · Tailwind CSS</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // ---------- Scroll reveal ----------
+  const revealEls = document.querySelectorAll('.reveal');
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  revealEls.forEach(el => io.observe(el));
+
+  // Bar fills (nested inside reveal containers) — trigger their own observer
+  const barEls = document.querySelectorAll('.bar-fill, .bar-v-fill');
+  const barIo = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        barIo.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.4 });
+  barEls.forEach(el => barIo.observe(el));
+
+  // ---------- Filter chips (visual demo only) ----------
+  document.querySelectorAll('#filter-chips .chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const group = chip.dataset.group;
+      document.querySelectorAll(`#filter-chips .chip[data-group="${group}"]`).forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
+  });
+
+  // ---------- Accordion ----------
+  document.querySelectorAll('.acc-trigger').forEach(trigger => {
+    trigger.addEventListener('click', () => {
+      const item = trigger.closest('.acc-item');
+      const wasOpen = item.classList.contains('open');
+      document.querySelectorAll('.acc-item').forEach(i => i.classList.remove('open'));
+      if (!wasOpen) item.classList.add('open');
+    });
+  });
+</script>
+
+</body>
+</html>
